@@ -1,0 +1,62 @@
+name: 盘前晨报
+
+on:
+  schedule:
+    # GitHub 的 cron 一律按 UTC:00:15 UTC = 北京时间 08:15(北京无夏令时,全年固定)
+    # 周一至周五(北京早上的周一~周五 = UTC 的周一~周五,00:15 未跨日)
+    - cron: '15 0 * * 1-5'
+  workflow_dispatch: {}   # 允许在 Actions 页面手动触发,方便随时补跑
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: pip install yfinance
+
+      - name: 生成报告
+        env:
+          # 在仓库 Settings → Secrets and variables → Actions 中添加,不加则跳过AI点评
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python us_premarket_report.py --out site
+          cp site/latest.html site/index.html
+
+      - name: 归档报告(Artifacts,默认保留90天)
+        uses: actions/upload-artifact@v4
+        with:
+          name: premarket-report-${{ github.run_id }}
+          path: site/
+
+      - name: 打包 Pages 产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 发布到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
